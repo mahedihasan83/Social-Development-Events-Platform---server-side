@@ -399,6 +399,94 @@ eventsRouter.delete("/:id", requireAuth, async (req, res) => {
   res.json({ message: "Event deleted successfully." });
 });
 
+/* ══════════════════════════ Joins routes ══════════════════════════ */
+
+const joinsRouter = express.Router();
+
+/** Join an event as the logged-in user (identified by the verified JWT). */
+joinsRouter.post("/:id/join", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid event id." });
+  }
+
+  const event = await eventsCollection.findOne({ _id: new ObjectId(id) });
+  if (!event) {
+    return res.status(404).json({ error: "Event not found." });
+  }
+  if (event.date < todayISO()) {
+    return res.status(400).json({
+      error: "This event has already taken place and can no longer be joined.",
+    });
+  }
+
+  const existing = await joinsCollection.findOne({
+    eventId: String(event._id),
+    userEmail: req.user.email,
+  });
+  if (existing) {
+    return res.status(409).json({ error: "You have already joined this event." });
+  }
+
+  await ensureIndexes();
+  await joinsCollection.insertOne({
+    eventId: String(event._id),
+    eventTitle: event.title,
+    eventDate: event.date,
+    userEmail: req.user.email,
+    userName: req.user.name,
+    joinedAt: new Date(),
+  });
+  await eventsCollection.updateOne({ _id: event._id }, { $inc: { joinedCount: 1 } });
+
+  res.status(201).json({ message: "You successfully joined this event! 🎉" });
+});
+
+/**
+ * All events joined by the logged-in user, sorted by event date as required.
+ * Falls back to the denormalized snapshot when an event was deleted.
+ */
+joinsRouter.get("/joined", requireAuth, async (req, res) => {
+  const joins = await joinsCollection
+    .find({ userEmail: req.user.email })
+    .sort({ joinedAt: -1 })
+    .toArray();
+
+  const eventIds = joins
+    .filter((j) => ObjectId.isValid(j.eventId))
+    .map((j) => new ObjectId(j.eventId));
+
+  const events = await eventsCollection.find({ _id: { $in: eventIds } }).toArray();
+  const byId = new Map(events.map((e) => [String(e._id), e]));
+
+  const joinedEvents = joins
+    .map((j) => {
+      const event = byId.get(j.eventId);
+      if (!event) return null;
+      return {
+        ...serializeEvent(event),
+        joinedAt: j.joinedAt.toISOString(),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.date.localeCompare(b.date)); // soonest event first
+
+  res.json({ events: joinedEvents });
+});
+
+/** Lightweight status check used by the Join button on the details page. */
+joinsRouter.get("/:id/status", requireAuth, async (req, res) => {
+  const id = req.params.id;
+  if (!ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "Invalid event id." });
+  }
+  const join = await joinsCollection.findOne({
+    eventId: id,
+    userEmail: req.user.email,
+  });
+  res.json({ joined: Boolean(join) });
+});
+
 /* ══════════════════════════ App ══════════════════════════ */
 
 const app = express();
@@ -417,7 +505,8 @@ app.all("/api/auth/{*any}", toNodeHandler(auth));
 
 app.use(express.json());
 
-// Events router.
+// Joins router first so /joined and /:id/status are not captured by /:id.
+app.use("/api/events", joinsRouter);
 app.use("/api/events", eventsRouter);
 
 // Health check for uptime monitors and the examiner. 🙂
