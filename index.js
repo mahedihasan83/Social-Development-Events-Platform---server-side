@@ -10,7 +10,8 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { MongoClient, ServerApiVersion } from "mongodb";
-import { betterAuth } from "better-auth";
+import { betterAuth, APIError } from "better-auth";
+import { createAuthMiddleware } from "@better-auth/core/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { toNodeHandler } from "better-auth/node";
 
@@ -100,6 +101,25 @@ const auth = betterAuth({
     minPasswordLength: 6,
     maxPasswordLength: 128,
     autoSignIn: true,
+  },
+
+  // Assignment rule enforced server-side: passwords must contain at least
+  // one uppercase and one lowercase letter — BetterAuth only checks length.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === "/sign-up/email") {
+        const password = ctx.body?.password;
+        if (
+          typeof password === "string" &&
+          (!/[A-Z]/.test(password) || !/[a-z]/.test(password))
+        ) {
+          throw new APIError("BAD_REQUEST", {
+            message:
+              "Password must contain at least one uppercase letter and one lowercase letter.",
+          });
+        }
+      }
+    }),
   },
 
   socialProviders,
