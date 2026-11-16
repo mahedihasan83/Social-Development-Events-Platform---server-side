@@ -10,6 +10,9 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { MongoClient, ServerApiVersion } from "mongodb";
+import { betterAuth } from "better-auth";
+import { mongodbAdapter } from "@better-auth/mongo-adapter";
+import { toNodeHandler } from "better-auth/node";
 
 /* ══════════════════════════ Environment ══════════════════════════ */
 
@@ -68,9 +71,62 @@ client.connect().catch((error) => {
   console.error("⚠️  MongoDB connection problem:", error.message);
 });
 
+/* ══════════════════════════ BetterAuth ══════════════════════════ */
+
+const isProd = process.env.NODE_ENV === "production";
+
+// Only register Google when credentials exist, so the API boots without them.
+const socialProviders = {
+  ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+    ? {
+        google: {
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        },
+      }
+    : {}),
+};
+
+const auth = betterAuth({
+  appName: "Shohojog",
+  baseURL: SERVER_URL,
+  trustedOrigins: [CLIENT_URL],
+  secret: process.env.BETTER_AUTH_SECRET,
+
+  database: mongodbAdapter(db, { client }),
+
+  emailAndPassword: {
+    enabled: true,
+    minPasswordLength: 6,
+    maxPasswordLength: 128,
+    autoSignIn: true,
+  },
+
+  socialProviders,
+
+  // In production the client (Vercel) and server (Render) sit on different
+  // domains, so the session cookie must be SameSite=None + Secure.
+  advanced: {
+    useSecureCookies: isProd,
+    ...(isProd ? { defaultCookieAttributes: { sameSite: "none", secure: true } } : {}),
+  },
+});
+
 /* ══════════════════════════ App ══════════════════════════ */
 
 const app = express();
+
+// CORS first (covers the auth handler's preflight requests too).
+app.use(
+  cors({
+    origin: [CLIENT_URL, "http://localhost:3000"],
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true, // session cookies travel with the request
+  })
+);
+
+// BetterAuth handler BEFORE any body-parsing middleware (per the docs).
+app.all("/api/auth/{*any}", toNodeHandler(auth));
 
 app.use(express.json());
 
