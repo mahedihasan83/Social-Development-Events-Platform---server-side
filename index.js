@@ -14,6 +14,7 @@ import { betterAuth, APIError } from "better-auth";
 import { createAuthMiddleware } from "@better-auth/core/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { toNodeHandler } from "better-auth/node";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 /* ══════════════════════════ Environment ══════════════════════════ */
 
@@ -131,6 +132,59 @@ const auth = betterAuth({
     ...(isProd ? { defaultCookieAttributes: { sameSite: "none", secure: true } } : {}),
   },
 });
+
+/* ══════════════════════════ JWT middleware ══════════════════════════ */
+
+// JWKS keys are cached by jose; `kid` mismatches trigger a refetch.
+const JWKS = createRemoteJWKSet(new URL(`${SERVER_URL}/api/auth/jwks`));
+
+async function verifyBearerToken(header) {
+  if (!header?.startsWith("Bearer ")) return null;
+  const token = header.slice("Bearer ".length).trim();
+  if (!token) return null;
+
+  const { payload } = await jwtVerify(token, JWKS, {
+    issuer: SERVER_URL, // must match BetterAuth baseURL
+    audience: SERVER_URL, // BetterAuth sets audience = baseURL by default
+  });
+
+  if (typeof payload.id !== "string" || typeof payload.email !== "string") {
+    return null;
+  }
+
+  return {
+    id: payload.id,
+    email: payload.email,
+    name: typeof payload.name === "string" ? payload.name : payload.email,
+    image: typeof payload.image === "string" ? payload.image : null,
+  };
+}
+
+/** 401s unless the request carries a valid JWT. Use on protected routes. */
+async function requireAuth(req, res, next) {
+  try {
+    const user = await verifyBearerToken(req.headers.authorization);
+    if (!user) {
+      return res
+        .status(401)
+        .json({ error: "Authentication required. Please log in to continue." });
+    }
+    req.user = user;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Your session has expired. Please log in again." });
+  }
+}
+
+/** Attaches `req.user` when a valid JWT is present, but never rejects. */
+async function optionalAuth(req, _res, next) {
+  try {
+    req.user = (await verifyBearerToken(req.headers.authorization)) ?? undefined;
+  } catch {
+    req.user = undefined;
+  }
+  next();
+}
 
 /* ══════════════════════════ App ══════════════════════════ */
 
