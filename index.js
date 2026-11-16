@@ -514,6 +514,17 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", service: "shohojog-api", time: new Date().toISOString() });
 });
 
+// 404 for unknown API routes (JSON, not HTML).
+app.use((_req, res) => {
+  res.status(404).json({ error: "Route not found." });
+});
+
+// Central error handler — always respond with JSON.
+app.use((error, _req, res, _next) => {
+  console.error("[shohojog-api] Unhandled error:", error);
+  res.status(500).json({ error: "Something went wrong on our side. Please try again." });
+});
+
 app.listen(PORT, () => {
   console.log(`🤝 Shohojog API listening on http://localhost:${PORT}`);
   ensureIndexes()
