@@ -1,17 +1,2 @@
-# Dependencies
-node_modules/
-
-# Environment variables — never commit secrets
 .env
-.env.local
-.env*.local
-
-# Logs
-*.log
-npm-debug.log*
-
-# OS / editor junk
-.DS_Store
-Thumbs.db
-.idea/
-.vscode/
+node_modules
