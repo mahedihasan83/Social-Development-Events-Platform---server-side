@@ -43,9 +43,9 @@ const allowedOrigins = (process.env.CLIENT_URL || "")
   .filter(Boolean);
 
 if (allowedOrigins.length === 0) {
-  allowedOrigins.push("http://localhost:3000");
+  allowedOrigins.push(`${process.env.CLIENT_URL}`);
   console.warn(
-    "⚠️  CLIENT_URL is not set — CORS restricted to http://localhost:3000. " +
+    `⚠️  CLIENT_URL is not set — CORS restricted to ${process.env.CLIENT_URL}. ` +
       "Add CLIENT_URL=... to .env before deploying."
   );
 }
