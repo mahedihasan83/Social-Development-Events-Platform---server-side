@@ -1143,3 +1143,5 @@ mongoose.connection.once("open", () => {
     console.log(`   → Deployed? Use your Render/Railway URL as NEXT_PUBLIC_API_URL on the client.`);
   });
 });
+
+export default app
